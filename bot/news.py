@@ -117,9 +117,11 @@ def fetch_candidates(cfg: dict, posted: list[dict]) -> list[dict]:
             continue
         result.append(it)
     log(f"кандидатов после фильтров: {len(result)}")
+    result.sort(key=lambda x: x["age_h"])  # сначала самые свежие
+    result = result[:60]
     for i, it in enumerate(result):
         it["id"] = i
-    return result[:70]
+    return result
 
 
 def article_text(item: dict) -> str:

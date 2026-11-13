@@ -7,7 +7,7 @@ import requests
 
 from . import env, log
 
-GEMINI_MODELS = [m for m in [env("GEMINI_MODEL"), "gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest"] if m]
+GEMINI_MODELS = [m for m in [env("GEMINI_MODEL"), "gemini-flash-latest", "gemini-3.8-flash", "gemini-flash-lite-latest"] if m]
 
 
 def _parse_json(text: str) -> dict:
@@ -22,30 +22,66 @@ def _parse_json(text: str) -> dict:
         raise
 
 
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta"
+_BAD = ("image", "tts", "audio", "live", "embedding", "thinking", "computer", "robotics")
+_models_cache: list[str] = []
+_dead: set[str] = set()
+
+
+def _gemini_models(key: str) -> list[str]:
+    """Список доступных моделей Flash: сначала предпочтительные, потом остальные (новые — первыми)."""
+    if _models_cache:
+        return [m for m in _models_cache if m not in _dead]
+    found = []
+    try:
+        r = requests.get(f"{GEMINI_URL}/models", params={"pageSize": 200}, headers={"x-goog-api-key": key}, timeout=30)
+        for m in r.json().get("models", []):
+            name = m["name"].split("/", 1)[-1]
+            if "generateContent" in m.get("supportedGenerationMethods", []) and "flash" in name and not any(b in name for b in _BAD):
+                found.append(name)
+    except Exception as e:  # noqa: BLE001
+        log("не удалось получить список моделей Gemini:", e)
+    pref = [m for m in GEMINI_MODELS if m != "gemini-2.5-flash"]
+    stable = sorted((m for m in found if "preview" not in m and "exp" not in m), reverse=True)
+    rest = sorted((m for m in found if m not in stable), reverse=True)
+    full = [m for m in stable if "lite" not in m] + [m for m in stable if "lite" in m] + rest
+    order = []
+    for m in pref + full:
+        if m not in order:
+            order.append(m)
+    _models_cache.extend(order)
+    log("модели Gemini:", ", ".join(order[:8]))
+    return order
+
+
 def _gemini(system: str, user: str) -> str:
     key = env("GEMINI_API_KEY")
     last = None
-    for model in GEMINI_MODELS:
-        for attempt in range(3):
+    for rnd in range(4):  # до 4 кругов по всем моделям — перегрузка у Google обычно проходит за минуты
+        for model in _gemini_models(key)[:6]:
             r = requests.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                f"{GEMINI_URL}/models/{model}:generateContent",
                 headers={"x-goog-api-key": key, "Content-Type": "application/json"},
                 json={
                     "systemInstruction": {"parts": [{"text": system}]},
                     "contents": [{"role": "user", "parts": [{"text": user}]}],
                     "generationConfig": {"responseMimeType": "application/json", "temperature": 0.55},
                 },
-                timeout=120,
+                timeout=180,
             )
             if r.status_code == 200:
-                parts = r.json()["candidates"][0]["content"]["parts"]
-                return "".join(p.get("text", "") for p in parts)
-            last = f"{model}: {r.status_code} {r.text[:300]}"
-            log("Gemini:", last)
-            if r.status_code in (429, 500, 503):
-                time.sleep(20 * (attempt + 1))
-                continue
-            break  # 404 и т.п. — пробуем следующую модель
+                try:
+                    parts = r.json()["candidates"][0]["content"]["parts"]
+                    return "".join(p.get("text", "") for p in parts if not p.get("thought"))
+                except (KeyError, IndexError):
+                    last = f"{model}: пустой ответ"
+                    continue
+            last = f"{model}: {r.status_code} {r.text[:200]}"
+            log("Gemini:", last.replace("\n", " "))
+            if r.status_code in (400, 403, 404):
+                _dead.add(model)  # модель недоступна для этого ключа — больше не пробуем
+            time.sleep(4)
+        time.sleep(45 * (rnd + 1))
     raise RuntimeError(f"Gemini не ответил: {last}")
 
 
