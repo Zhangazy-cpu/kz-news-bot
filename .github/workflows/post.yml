@@ -1,0 +1,119 @@
+name: Новостной Reels
+
+on:
+  schedule:
+    # Время UTC. Астана = UTC+5  →  08:47, 13:17 и 18:47 по Астане
+    - cron: "47 3 * * *"
+    - cron: "17 8 * * *"
+    - cron: "47 13 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Только собрать видео (без публикации в Instagram)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: news-reel
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: vars.BOT_PAUSED != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      has_reel: ${{ steps.build.outputs.has_reel }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: video/package-lock.json
+
+      - name: Установка
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-noto-color-emoji > /dev/null
+          pip install -q -r requirements.txt
+          npm ci --prefix video --no-audit --no-fund
+          cd video && npx remotion browser ensure
+
+      - name: Найти новость и собрать ролик
+        id: build
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+        run: python -m bot.main build
+
+      - name: Сохранить ролик (для просмотра в GitHub)
+        if: steps.build.outputs.has_reel == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reel
+          path: out/
+          retention-days: 7
+
+      - name: Подготовить файл для публичной ссылки
+        if: steps.build.outputs.has_reel == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.has_reel == 'true' && (github.event_name == 'schedule' || inputs.dry_run == false)
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  publish:
+    needs: [build, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -q -r requirements.txt
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: reel
+          path: out
+
+      - name: Опубликовать в Instagram
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          PAGES_URL: ${{ needs.deploy.outputs.page_url }}
+        run: python -m bot.main publish
+
+      - name: Запомнить опубликованное
+        run: |
+          git config user.name "news-bot"
+          git config user.email "news-bot@users.noreply.github.com"
+          git add state/posted.json
+          git commit -m "posted: $(date -u +%F_%H:%M)" || exit 0
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done

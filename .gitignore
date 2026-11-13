@@ -1,0 +1,7 @@
+node_modules/
+out/
+site/
+video/public/run/
+__pycache__/
+*.pyc
+.env

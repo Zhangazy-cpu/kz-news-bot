@@ -1,0 +1,33 @@
+name: Продление токена Instagram
+
+# Токен Instagram живёт 60 дней. Этот сценарий продлевает его 1-го и 15-го числа каждого месяца
+# и сам записывает новый токен в секреты репозитория (нужен секрет GH_PAT, см. README).
+on:
+  schedule:
+    - cron: "23 2 1,15 * *"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q -r requirements.txt
+      - name: Продлить токен
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          NEW_TOKEN_FILE: /tmp/new_token
+        run: python -m bot.main refresh
+      - name: Сохранить новый токен в секреты
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::Секрет GH_PAT не задан — новый токен не сохранён. Обновите IG_ACCESS_TOKEN вручную раз в 60 дней."
+            exit 0
+          fi
+          gh secret set IG_ACCESS_TOKEN --repo "$GITHUB_REPOSITORY" < /tmp/new_token
+          rm -f /tmp/new_token

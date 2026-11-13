@@ -1,0 +1,33 @@
+# ===== Настройки бота. Меняйте здесь — код трогать не нужно. =====
+
+account:
+  handle: "@qazaq.janalyq"      # ваш ник в Instagram (показывается в каждом ролике)
+  brand: "QJ"                   # 1–3 буквы в кружке-аватаре на видео
+  voice: "kk-KZ-DauletNeural"   # мужской голос; женский: kk-KZ-AigulNeural
+  rate: "+8%"                   # скорость речи (+0% — обычная)
+
+posting:
+  max_video_seconds: 75         # Instagram через API принимает Reels до 90 сек
+  hashtags: ["#жаңалықтар", "#қазақстан", "#qazaqstan", "#news", "#kz"]
+
+news:
+  max_age_hours: 20             # брать новости не старше N часов
+  # Ленты RSS. Если какая-то перестанет работать — бот её пропустит
+  # и попробует найти RSS на главной странице сайта автоматически.
+  feeds:
+    - {name: "Tengrinews",   url: "https://kaz.tengrinews.kz/news.rss",   site: "https://kaz.tengrinews.kz/"}
+    - {name: "Tengrinews",   url: "https://tengrinews.kz/news.rss",       site: "https://tengrinews.kz/"}
+    - {name: "Kazinform",    url: "https://www.inform.kz/rss/kz.xml",      site: "https://www.inform.kz/kz/"}
+    - {name: "Baq.kz",       url: "https://baq.kz/rss",                    site: "https://baq.kz/"}
+    - {name: "Egemen",       url: "https://egemen.kz/rss",                 site: "https://egemen.kz/"}
+    - {name: "24.kz",        url: "https://24.kz/kz/?format=feed&type=rss", site: "https://24.kz/kz/"}
+    - {name: "Informburo",   url: "https://informburo.kz/rss",             site: "https://informburo.kz/"}
+    - {name: "Zakon.kz",     url: "https://www.zakon.kz/rss/",             site: "https://www.zakon.kz/"}
+    - {name: "Time.kz",      url: "https://time.kz/rss",                   site: "https://time.kz/"}
+  # Запасной вариант — Google Новости по Казахстану (только заголовок + анонс)
+  google_news_fallback: true
+
+safety:
+  # Новости с этими словами бот пропускает (криминал с жертвами, трагедии, слухи).
+  skip_keywords: ["суицид", "өзін-өзі", "изнасил", "зорла", "педофил", "убийств", "кісі өлтір",
+                  "гороскоп", "реклама", "на правах рекламы", "18+"]
