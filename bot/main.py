@@ -213,6 +213,10 @@ def cmd_prepare() -> None:
 def cmd_pick() -> None:
     """Перед публикацией: берёт самый старый свежий ролик из очереди в out/ и site/."""
     cfg = load_config()
+    if env("HAS_IG_TOKEN") == "false":
+        print("::warning::Instagram ещё не подключён (нет секрета IG_ACCESS_TOKEN) — публикацию пропускаю, ролики копятся в очереди")
+        gh_output(has_reel="false", need_build="false")
+        return
     if not due(state.load(), cfg):
         gh_output(has_reel="false", need_build="false")
         return

@@ -23,6 +23,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+      HAS_IG_TOKEN: ${{ secrets.IG_ACCESS_TOKEN != '' }}
     outputs:
       has_reel: ${{ steps.pick.outputs.has_reel == 'true' || steps.build.outputs.has_reel == 'true' }}
     steps:
