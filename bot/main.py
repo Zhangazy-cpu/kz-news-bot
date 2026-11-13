@@ -62,6 +62,7 @@ def build_caption(script: dict, item: dict, cfg: dict) -> str:
             tags.append(t)
     cap = (script.get("caption") or script.get("headline", "")).strip()
     cap += f"\n\nДереккөз: {item['source']}"
+    cap += "\n🎙 Дауыс жасанды интеллект көмегімен жасалған."
     cap += "\n\n" + " ".join(tags[:12])
     return cap[:2150]
 
