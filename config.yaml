@@ -9,6 +9,8 @@ account:
 posting:
   posts_per_day: 3              # сколько роликов в день
   min_gap_hours: 3              # минимальный перерыв между роликами, часов
+  queue_size: 3                 # сколько готовых роликов держать про запас
+  max_queue_age_hours: 20       # ролик старше — новость устарела, выбрасываем
   max_video_seconds: 75         # Instagram через API принимает Reels до 90 сек
   hashtags: ["#жаңалықтар", "#қазақстан", "#qazaqstan", "#news", "#kz"]
 

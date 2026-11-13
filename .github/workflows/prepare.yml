@@ -1,0 +1,58 @@
+name: Подготовка роликов
+
+# Каждый час бот проверяет очередь. Если готовых роликов меньше 3 — находит новость
+# и собирает ещё один (когда Gemini свободен). Публикация — отдельно, по расписанию.
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: news-reel-prepare
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: vars.BOT_PAUSED != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -q -r requirements.txt
+
+      - name: Нужен ли новый ролик?
+        id: need
+        run: python -m bot.main need
+
+      - uses: actions/setup-node@v4
+        if: steps.need.outputs.need == 'true'
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: video/package-lock.json
+
+      - name: Установка видео-инструментов
+        if: steps.need.outputs.need == 'true'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          npm ci --prefix video --no-audit --no-fund
+          cd video && npx remotion browser ensure
+
+      - name: Найти новость, собрать ролик и положить в очередь
+        if: steps.need.outputs.need == 'true'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+        run: python -m bot.main prepare

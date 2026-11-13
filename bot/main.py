@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import OUT, ROOT, RUN_PUBLIC, SITE, env, load_config, log
-from . import instagram, llm, media, news, prompts, state, tts
+from . import instagram, llm, media, news, prompts, queue, state, tts
 
 TYPES = {"hook", "number", "list", "timeline", "flow", "statement", "photo", "compare", "outro"}
 MONTHS = ["қаңтар", "ақпан", "наурыз", "сәуір", "мамыр", "маусым", "шілде", "тамыз", "қыркүйек", "қазан", "қараша", "желтоқсан"]
@@ -111,12 +111,14 @@ def due(posted: list[dict], cfg: dict) -> bool:
     return True
 
 
-def cmd_build(dry=False) -> None:
+def cmd_build(check_due=True, extra_posted: list[dict] | None = None) -> dict | None:
+    """Находит новость и собирает ролик в out/ и site/. Возвращает meta или None."""
     cfg = load_config()
     posted = state.load()
-    if not due(posted, cfg):
+    if check_due and not due(posted, cfg):
         gh_output(has_reel="false")
-        return
+        return None
+    posted = posted + (extra_posted or [])
     shutil.rmtree(OUT, ignore_errors=True)
     shutil.rmtree(SITE, ignore_errors=True)
     OUT.mkdir(parents=True)
@@ -126,7 +128,7 @@ def cmd_build(dry=False) -> None:
     if not cands:
         log("нет новых новостей — пропускаю запуск")
         gh_output(has_reel="false")
-        return
+        return None
 
     recent = [p.get("headline", p.get("source_title", "")) for p in posted]
     today = kz_date(datetime.now(timezone(timedelta(hours=5))))
@@ -159,7 +161,7 @@ def cmd_build(dry=False) -> None:
     if not chosen or not script.get("scenes"):
         log("подходящей новости не нашлось — пропускаю")
         gh_output(has_reel="false")
-        return
+        return None
 
     scenes = sanitize(script)
     mp4, cover, props = produce(scenes, cfg, item["source"])
@@ -169,6 +171,7 @@ def cmd_build(dry=False) -> None:
     (SITE / "index.html").write_text("<meta charset=utf-8><p>KZ news bot: OK</p>", encoding="utf-8")
     meta = {
         "slug": slug,
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "headline": script.get("headline", item["title"]),
         "caption": build_caption(script, item, cfg),
         "source": item["source"],
@@ -179,6 +182,58 @@ def cmd_build(dry=False) -> None:
     (OUT / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     log(f"готово: {meta['seconds']} с — {meta['headline']}")
     gh_output(has_reel="true")
+    return meta
+
+
+def cmd_need() -> None:
+    """Нужно ли готовить новый ролик (очередь не заполнена)?"""
+    cfg = load_config()
+    size = cfg["posting"].get("queue_size", 3)
+    max_age = cfg["posting"].get("max_queue_age_hours", 20)
+    fresh = []
+    for m in queue.items():
+        if queue.age_hours(m) > max_age:
+            log(f"устарел, удаляю: {m['slug']} — {m.get('headline')}")
+            queue.remove(m["slug"])
+        else:
+            fresh.append(m)
+    log(f"в очереди {len(fresh)} из {size}")
+    gh_output(need="true" if len(fresh) < size else "false")
+
+
+def cmd_prepare() -> None:
+    """Готовит один ролик и кладёт его в очередь (вызывается, когда очередь не полна)."""
+    metas = queue.items()
+    extra = [{"source_title": m.get("source_title", ""), "link": m.get("link"), "headline": m.get("headline", "")} for m in metas]
+    meta = cmd_build(check_due=False, extra_posted=extra)
+    if meta:
+        queue.add(OUT / "reel.mp4", OUT / "cover.jpg", meta)
+
+
+def cmd_pick() -> None:
+    """Перед публикацией: берёт самый старый свежий ролик из очереди в out/ и site/."""
+    cfg = load_config()
+    if not due(state.load(), cfg):
+        gh_output(has_reel="false", need_build="false")
+        return
+    max_age = cfg["posting"].get("max_queue_age_hours", 20)
+    shutil.rmtree(OUT, ignore_errors=True)
+    shutil.rmtree(SITE, ignore_errors=True)
+    for m in queue.items():
+        if queue.age_hours(m) > max_age:
+            queue.remove(m["slug"])
+            continue
+        queue.download(m["slug"], SITE)
+        OUT.mkdir(parents=True)
+        (SITE / f"{m['slug']}.json").unlink(missing_ok=True)
+        (SITE / "index.html").write_text("<meta charset=utf-8><p>KZ news bot: OK</p>", encoding="utf-8")
+        m["queued"] = True
+        (OUT / "meta.json").write_text(json.dumps(m, ensure_ascii=False, indent=1), encoding="utf-8")
+        log(f"беру из очереди: {m['slug']} — {m.get('headline')}")
+        gh_output(has_reel="true", need_build="false")
+        return
+    log("очередь пуста — соберу ролик прямо сейчас")
+    gh_output(has_reel="false", need_build="true")
 
 
 def cmd_publish() -> None:
@@ -191,6 +246,8 @@ def cmd_publish() -> None:
     instagram.wait_url(video_url)
     res = instagram.publish_reel(video_url, cover_url, meta["caption"])
     state.add({k: meta[k] for k in ("headline", "source", "source_title", "link")} | res)
+    if meta.get("queued"):
+        queue.remove(meta["slug"])
 
 
 def cmd_demo() -> None:
@@ -211,11 +268,11 @@ def cmd_refresh() -> None:
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "build"
-    if cmd == "build":
+    if cmd in ("build", "prepare"):
         try:
-            cmd_build()
+            cmd_prepare() if cmd == "prepare" else cmd_build()
         except llm.LLMBusy as e:
-            print(f"::warning::ИИ перегружен, пропускаю этот запуск: {e}")
+            print(f"::warning::ИИ сейчас перегружен, попробую в следующий раз: {e}")
             gh_output(has_reel="false")
         sys.exit(0)
-    {"build": cmd_build, "publish": cmd_publish, "demo": cmd_demo, "refresh": cmd_refresh}[cmd]()
+    {"need": cmd_need, "pick": cmd_pick, "publish": cmd_publish, "demo": cmd_demo, "refresh": cmd_refresh}[cmd]()

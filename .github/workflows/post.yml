@@ -1,16 +1,10 @@
-name: Новостной Reels
+name: Публикация в Instagram
 
 on:
   schedule:
-    # Каждые 2 часа с 08:17 до 22:17 по Астане (UTC+5). Бот сам следит,
-    # чтобы в день было не больше 3 постов и перерыв между ними — от 3 часов.
-    - cron: "17 3-17/2 * * *"
+    # Время UTC. Астана = UTC+5  →  08:47, 13:47 и 18:47 по Астане
+    - cron: "47 3,8,13 * * *"
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Только собрать видео (без публикации в Instagram)"
-        type: boolean
-        default: true
 
 permissions:
   contents: write
@@ -18,16 +12,19 @@ permissions:
   id-token: write
 
 concurrency:
-  group: news-reel
+  group: news-reel-post
   cancel-in-progress: false
 
 jobs:
-  build:
+  pick:
     if: vars.BOT_PAUSED != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
     outputs:
-      has_reel: ${{ steps.build.outputs.has_reel }}
+      has_reel: ${{ steps.pick.outputs.has_reel == 'true' || steps.build.outputs.has_reel == 'true' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,45 +33,51 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - run: pip install -q -r requirements.txt
+
+      - name: Взять готовый ролик из очереди
+        id: pick
+        run: python -m bot.main pick
+
+      # Запасной путь: очередь пуста — собираем ролик прямо сейчас
       - uses: actions/setup-node@v4
+        if: steps.pick.outputs.need_build == 'true'
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: video/package-lock.json
 
-      - name: Установка
+      - name: Установка видео-инструментов
+        if: steps.pick.outputs.need_build == 'true'
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-noto-color-emoji > /dev/null
-          pip install -q -r requirements.txt
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
           npm ci --prefix video --no-audit --no-fund
           cd video && npx remotion browser ensure
 
-      - name: Найти новость и собрать ролик
+      - name: Собрать ролик сейчас
         id: build
+        if: steps.pick.outputs.need_build == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-          FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: python -m bot.main build
 
-      - name: Сохранить ролик (для просмотра в GitHub)
-        if: steps.build.outputs.has_reel == 'true'
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
+        if: steps.pick.outputs.has_reel == 'true' || steps.build.outputs.has_reel == 'true'
         with:
           name: reel
           path: out/
           retention-days: 7
 
-      - name: Подготовить файл для публичной ссылки
-        if: steps.build.outputs.has_reel == 'true'
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.pick.outputs.has_reel == 'true' || steps.build.outputs.has_reel == 'true'
         with:
           path: site
 
   deploy:
-    needs: build
-    if: needs.build.outputs.has_reel == 'true' && (github.event_name == 'schedule' || inputs.dry_run == false)
+    needs: pick
+    if: needs.pick.outputs.has_reel == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -86,9 +89,11 @@ jobs:
         uses: actions/deploy-pages@v4
 
   publish:
-    needs: [build, deploy]
+    needs: [pick, deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
