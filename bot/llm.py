@@ -54,12 +54,18 @@ def _gemini_models(key: str) -> list[str]:
     return order
 
 
+class LLMBusy(RuntimeError):
+    """Серверы ИИ перегружены — запуск можно спокойно пропустить."""
+
+
 def _gemini(system: str, user: str) -> str:
     key = env("GEMINI_API_KEY")
     last = None
-    for rnd in range(4):  # до 4 кругов по всем моделям — перегрузка у Google обычно проходит за минуты
+    busy = False
+    for rnd in range(5):  # до 5 кругов по моделям — перегрузка у Google обычно проходит за минуты
         for model in _gemini_models(key)[:6]:
-            r = requests.post(
+            try:
+                r = requests.post(
                 f"{GEMINI_URL}/models/{model}:generateContent",
                 headers={"x-goog-api-key": key, "Content-Type": "application/json"},
                 json={
@@ -67,8 +73,13 @@ def _gemini(system: str, user: str) -> str:
                     "contents": [{"role": "user", "parts": [{"text": user}]}],
                     "generationConfig": {"responseMimeType": "application/json", "temperature": 0.55},
                 },
-                timeout=180,
-            )
+                timeout=150,
+                )
+            except requests.RequestException as e:
+                last = f"{model}: {type(e).__name__}"
+                log("Gemini:", last)
+                busy = True
+                continue
             if r.status_code == 200:
                 try:
                     parts = r.json()["candidates"][0]["content"]["parts"]
@@ -78,10 +89,16 @@ def _gemini(system: str, user: str) -> str:
                     continue
             last = f"{model}: {r.status_code} {r.text[:200]}"
             log("Gemini:", last.replace("\n", " "))
-            if r.status_code in (400, 403, 404):
-                _dead.add(model)  # модель недоступна для этого ключа — больше не пробуем
+            if r.status_code in (400, 403, 404, 429):
+                _dead.add(model)  # модель недоступна/лимит исчерпан — в этом запуске больше не пробуем
+            if r.status_code in (429, 500, 502, 503, 504):
+                busy = True
             time.sleep(4)
-        time.sleep(45 * (rnd + 1))
+        if not _gemini_models(key):
+            break
+        time.sleep(60 * (rnd + 1))
+    if busy:
+        raise LLMBusy(f"Gemini перегружен: {last}")
     raise RuntimeError(f"Gemini не ответил: {last}")
 
 

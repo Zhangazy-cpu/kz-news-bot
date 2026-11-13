@@ -87,9 +87,36 @@ def produce(scenes: list[dict], cfg: dict, source: str, allow_silent=False) -> t
     return mp4, cover, props
 
 
+def due(posted: list[dict], cfg: dict) -> bool:
+    """Нужно ли публиковать сейчас: не больше N постов в день и пауза между ними."""
+    if env("FORCE") == "1":
+        return True
+    per_day = cfg["posting"].get("posts_per_day", 3)
+    gap_h = cfg["posting"].get("min_gap_hours", 3)
+    tz = timezone(timedelta(hours=5))
+    now = datetime.now(tz)
+    times = []
+    for p in posted:
+        try:
+            times.append(datetime.fromisoformat(p["posted_at"]).astimezone(tz))
+        except (KeyError, ValueError):
+            pass
+    today = [t for t in times if t.date() == now.date()]
+    if len(today) >= per_day:
+        log(f"сегодня уже {len(today)} постов — пропускаю")
+        return False
+    if times and (now - max(times)).total_seconds() < gap_h * 3600:
+        log("последний пост был недавно — пропускаю")
+        return False
+    return True
+
+
 def cmd_build(dry=False) -> None:
     cfg = load_config()
     posted = state.load()
+    if not due(posted, cfg):
+        gh_output(has_reel="false")
+        return
     shutil.rmtree(OUT, ignore_errors=True)
     shutil.rmtree(SITE, ignore_errors=True)
     OUT.mkdir(parents=True)
@@ -184,4 +211,11 @@ def cmd_refresh() -> None:
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "build"
+    if cmd == "build":
+        try:
+            cmd_build()
+        except llm.LLMBusy as e:
+            print(f"::warning::ИИ перегружен, пропускаю этот запуск: {e}")
+            gh_output(has_reel="false")
+        sys.exit(0)
     {"build": cmd_build, "publish": cmd_publish, "demo": cmd_demo, "refresh": cmd_refresh}[cmd]()
