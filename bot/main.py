@@ -229,6 +229,7 @@ def cmd_build(check_due=True, extra_posted: list[dict] | None = None) -> dict | 
     meta = {
         "slug": slug,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "handle": cfg["account"]["handle"],
         "headline": script.get("headline", item["title"]),
         "caption": build_caption(script, item, cfg),
         "source": item["source"],
@@ -249,7 +250,7 @@ def cmd_need() -> None:
     max_age = cfg["posting"].get("max_queue_age_hours", 20)
     fresh = []
     for m in queue.items():
-        if queue.age_hours(m) > max_age:
+        if queue.age_hours(m) > max_age or m.get("handle") != cfg["account"]["handle"]:
             log(f"устарел, удаляю: {m['slug']} — {m.get('headline')}")
             queue.remove(m["slug"])
         else:
@@ -281,7 +282,7 @@ def cmd_pick() -> None:
     shutil.rmtree(OUT, ignore_errors=True)
     shutil.rmtree(SITE, ignore_errors=True)
     for m in queue.items():
-        if queue.age_hours(m) > max_age:
+        if queue.age_hours(m) > max_age or m.get("handle") != cfg["account"]["handle"]:
             queue.remove(m["slug"])
             continue
         queue.download(m["slug"], SITE)

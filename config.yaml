@@ -1,7 +1,7 @@
 # ===== Настройки бота. Меняйте здесь — код трогать не нужно. =====
 
 account:
-  handle: "@qazaq.janalyq"      # ваш ник в Instagram (показывается в каждом ролике)
+  handle: "@janalyqtar.qz"      # ваш ник в Instagram (показывается в каждом ролике)
   brand: "JQ"                   # 1–3 буквы в кружке-аватаре на видео
   voice: "kk-KZ-DauletNeural"   # мужской голос; женский: kk-KZ-AigulNeural
   rate: "+8%"                   # скорость речи (+0% — обычная)
