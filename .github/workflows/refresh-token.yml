@@ -25,6 +25,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
+          if [ ! -s /tmp/new_token ]; then echo "Токен не требует продления"; exit 0; fi
           if [ -z "$GH_TOKEN" ]; then
             echo "::warning::Секрет GH_PAT не задан — новый токен не сохранён. Обновите IG_ACCESS_TOKEN вручную раз в 60 дней."
             exit 0

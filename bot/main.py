@@ -323,6 +323,8 @@ def cmd_demo() -> None:
 
 def cmd_refresh() -> None:
     new = instagram.refresh_token()
+    if not new:
+        return
     print(f"::add-mask::{new}")
     Path(os.environ.get("NEW_TOKEN_FILE", "/tmp/new_token")).write_text(new)
     log("токен продлён на 60 дней")
@@ -337,4 +339,4 @@ if __name__ == "__main__":
             print(f"::warning::ИИ сейчас перегружен, попробую в следующий раз: {e}")
             gh_output(has_reel="false")
         sys.exit(0)
-    {"need": cmd_need, "pick": cmd_pick, "publish": cmd_publish, "demo": cmd_demo, "refresh": cmd_refresh}[cmd]()
+    {"check": instagram.check, "need": cmd_need, "pick": cmd_pick, "publish": cmd_publish, "demo": cmd_demo, "refresh": cmd_refresh}[cmd]()

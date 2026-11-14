@@ -2,6 +2,7 @@
 
 account:
   handle: "@janalyqtar.qz"      # ваш ник в Instagram (показывается в каждом ролике)
+  ig_user_id: "17841415077854393"  # ID аккаунта Instagram (из панели Meta)
   brand: "JQ"                   # 1–3 буквы в кружке-аватаре на видео
   voice: "kk-KZ-DauletNeural"   # мужской голос; женский: kk-KZ-AigulNeural
   rate: "+8%"                   # скорость речи (+0% — обычная)
