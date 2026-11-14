@@ -2,7 +2,7 @@
 
 account:
   handle: "@qazaq.janalyq"      # ваш ник в Instagram (показывается в каждом ролике)
-  brand: "QJ"                   # 1–3 буквы в кружке-аватаре на видео
+  brand: "JQ"                   # 1–3 буквы в кружке-аватаре на видео
   voice: "kk-KZ-DauletNeural"   # мужской голос; женский: kk-KZ-AigulNeural
   rate: "+8%"                   # скорость речи (+0% — обычная)
 
