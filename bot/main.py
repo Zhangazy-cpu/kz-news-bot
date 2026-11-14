@@ -32,9 +32,66 @@ def gh_output(**kw) -> None:
                 f.write(f"{k}={v}\n")
 
 
+def _txt(v) -> str:
+    """Любое значение от ИИ → строка (ИИ иногда присылает объект или список вместо текста)."""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v.strip()
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, dict):
+        for k in ("text", "value", "title", "label", "name", "date"):
+            if v.get(k):
+                return _txt(v[k])
+        return " ".join(_txt(x) for x in v.values() if x)
+    if isinstance(v, list):
+        return " ".join(_txt(x) for x in v if x)
+    return str(v)
+
+
+def _normalize(s: dict) -> None:
+    for k in ("title", "highlight", "pill", "number", "label", "note", "imageCaption", "imageQuery", "narration"):
+        if k in s:
+            s[k] = _txt(s[k])
+            if not s[k]:
+                s.pop(k)
+    if "steps" in s:
+        s["steps"] = [_txt(x) for x in (s["steps"] if isinstance(s["steps"], list) else [s["steps"]]) if _txt(x)]
+    if "items" in s:
+        items = []
+        for it in s["items"] if isinstance(s["items"], list) else []:
+            if isinstance(it, dict):
+                d = {"text": _txt(it.get("text") or it.get("title") or it.get("label"))}
+                if it.get("sub"):
+                    d["sub"] = _txt(it["sub"])
+                if isinstance(it.get("icon"), str):
+                    d["icon"] = it["icon"]
+                if it.get("mark") in ("x", "check"):
+                    d["mark"] = it["mark"]
+            else:
+                d = {"text": _txt(it)}
+            if d["text"]:
+                items.append(d)
+        s["items"] = items
+    if "points" in s:
+        pts = []
+        for pt in s["points"] if isinstance(s["points"], list) else []:
+            if isinstance(pt, dict):
+                pts.append({"date": _txt(pt.get("date")), "label": _txt(pt.get("label") or pt.get("text"))})
+            else:
+                pts.append({"date": _txt(pt), "label": ""})
+        s["points"] = pts
+    for k in ("left", "right"):
+        if k in s:
+            v = s[k]
+            s[k] = {"value": _txt(v.get("value")), "label": _txt(v.get("label"))} if isinstance(v, dict) else {"value": _txt(v), "label": ""}
+
+
 def sanitize(script: dict) -> list[dict]:
-    scenes = [s for s in script.get("scenes", []) if s.get("type") in TYPES and (s.get("narration") or "").strip()]
+    scenes = [s for s in script.get("scenes", []) if isinstance(s, dict) and s.get("type") in TYPES and _txt(s.get("narration"))]
     for s in scenes:
+        _normalize(s)
         if s.get("highlight") and s["highlight"] not in (s.get("title") or ""):
             s.pop("highlight")
         for k in ("items", "points", "steps"):
